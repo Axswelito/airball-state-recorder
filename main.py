@@ -50,6 +50,8 @@ AIRCALL_API_KEY = os.getenv("AIRCALL_API_KEY")
 AIRCALL_API_URL = "https://api.aircall.io/v1/calls"
 
 def extract_area_code(phone_number: str) -> str:
+    if not phone_number:
+        return None
     if phone_number.startswith("+1") and len(phone_number) > 4:
         return phone_number[2:5]
     return None
