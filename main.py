@@ -49,9 +49,13 @@ AIRCALL_API_KEY = os.getenv("AIRCALL_API_KEY")
 AIRCALL_API_URL = "https://api.aircall.io/v1/calls"
 
 def extract_area_code(phone_number: str) -> str:
-    if phone_number and phone_number.startswith("+1") and len(phone_number) > 4:
+    if not phone_number:
+        return None
+    phone_number = phone_number.replace(" ", "").replace("-", "")  # strip spaces and dashes
+    if phone_number.startswith("+1") and len(phone_number) > 4:
         return phone_number[2:5]
     return None
+
 
 @app.post("/webhook")
 async def handle_webhook(request: Request):
