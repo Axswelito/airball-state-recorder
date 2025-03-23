@@ -10,7 +10,7 @@ TWO_PARTY_STATES = {
     "MT", "NH", "OR", "PA", "WA", "CT"
 }
 
-# Example area code map (you can expand this)
+# Area code to US state mapping (expand as needed)
 AREA_CODE_TO_STATE = {
     # California (CA)
     "213": "CA", "310": "CA", "415": "CA", "408": "CA", "818": "CA", "619": "CA",
@@ -38,33 +38,41 @@ AREA_CODE_TO_STATE = {
     "215": "PA", "412": "PA", "717": "PA", "610": "PA",
     # Washington (WA)
     "206": "WA", "253": "WA", "425": "WA",
-    
-    # Extra (1-party states) for variety
+
+    # 1-party example states
     "212": "NY", "646": "NY", "718": "NY",    # New York
     "214": "TX", "512": "TX", "713": "TX",    # Texas
     "703": "VA", "804": "VA"                  # Virginia
 }
 
-
 AIRCALL_API_KEY = os.getenv("AIRCALL_API_KEY")
 AIRCALL_API_URL = "https://api.aircall.io/v1/calls"
 
 def extract_area_code(phone_number: str) -> str:
-    if not phone_number:
-        return None
-    if phone_number.startswith("+1") and len(phone_number) > 4:
+    if phone_number and phone_number.startswith("+1") and len(phone_number) > 4:
         return phone_number[2:5]
     return None
 
 @app.post("/webhook")
 async def handle_webhook(request: Request):
-    data = await request.json()
-    caller = data.get("caller_number")
-    call_id = data.get("id")
+    payload = await request.json()
+    call_data = payload.get("data", {})
+    call_id = call_data.get("id")
 
-    print(f"📞 Incoming call from {caller} with ID {call_id}")
+    # Priority 1: Use raw_digits if available
+    phone_number = call_data.get("raw_digits")
 
-    area_code = extract_area_code(caller)
+    # Fallback: Search participants for an external number
+    if not phone_number:
+        participants = call_data.get("participants", [])
+        for p in participants:
+            if p.get("type") == "external" and "phone_number" in p:
+                phone_number = p["phone_number"]
+                break
+
+    print(f"📞 Incoming call from {phone_number} with ID {call_id}")
+
+    area_code = extract_area_code(phone_number)
     state = AREA_CODE_TO_STATE.get(area_code)
 
     if not state:
@@ -75,8 +83,9 @@ async def handle_webhook(request: Request):
         print(f"🔒 {state} is a 2-party consent state. Do NOT record.")
         return {"recording": False, "state": state}
 
-    # Enable recording if 1-party state
     print(f"✅ {state} is a 1-party consent state. Enabling recording.")
+
+    # PATCH call to enable recording
     if AIRCALL_API_KEY and call_id:
         headers = {"Authorization": f"Bearer {AIRCALL_API_KEY}"}
         async with httpx.AsyncClient() as client:
