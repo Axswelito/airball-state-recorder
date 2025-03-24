@@ -51,16 +51,28 @@ AIRCALL_API_URL = "https://api.aircall.io/v1/calls"
 def extract_area_code(phone_number: str) -> str:
     if not phone_number:
         return None
-    phone_number = phone_number.replace(" ", "").replace("-", "")  # strip spaces and dashes
-    if phone_number.startswith("+1") and len(phone_number) > 4:
-        return phone_number[2:5]
+    # Remove spaces, dashes, and parentheses
+    cleaned = (
+        phone_number.replace(" ", "")
+        .replace("-", "")
+        .replace("(", "")
+        .replace(")", "")
+    )
+    if cleaned.startswith("+1") and len(cleaned) > 4:
+        return cleaned[2:5]
     return None
-
 
 @app.post("/webhook")
 async def handle_webhook(request: Request):
     payload = await request.json()
     call_data = payload.get("data", {})
+    
+    # Debug Aircall number receiving the call
+    number_info = call_data.get("number", {})
+    number_id = number_info.get("id")
+    number_name = number_info.get("name")
+    print(f"📟 Aircall number info: ID={number_id}, Name={number_name}")
+
     call_id = call_data.get("id")
 
     # Priority 1: Use raw_digits if available
