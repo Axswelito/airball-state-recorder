@@ -13,7 +13,7 @@ TWO_PARTY_STATES = {
 # Area code to US state mapping (expand as needed)
 AREA_CODE_TO_STATE = {
     # California (CA)
-    "213": "CA", "310": "CA", "415": "CA", "408": "CA", "818": "CA", "619": "CA",
+    "213": "CA", "310": "CA", "415": "CA", "408": "CA", "818": "CA", "619": "CA", "510": "CA",
     # Connecticut (CT)
     "203": "CT", "860": "CT",
     # Delaware (DE)
