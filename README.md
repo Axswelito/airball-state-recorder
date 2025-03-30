@@ -1,2 +1,2 @@
-# airball-state-recorder
+# aircall-state-recorder
 Webhook to dynamically enable Aircall recording based on US state
