@@ -16,8 +16,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 # Define a set of US states that require two-party consent for recording.
 # Recording calls in these states without the consent of all parties involved can be illegal.
 TWO_PARTY_STATES = {
-    "CA", "DE", "FL", "IL", "MD", "MA", "MI",
-    "MT", "NH", "OR", "PA", "WA", "CT"
+    "CALIFORNIA", "CONNECTICUT", "DELAWARE", "FLORIDA", "ILLINOIS", "MARYLAND",
+    "MASSACHUSETTS", "MICHIGAN", "MONTANA", "NEW HAMPSHIRE", "OREGON", "PENNSYLVANIA", "WASHINGTON"
 }
 
 # Define a dictionary mapping US area codes to their corresponding states.
@@ -134,7 +134,7 @@ async def handle_webhook(request: Request):
                     "Authorization": f"Basic {encoded_credentials}",
                     "Content-Type": "application/json"
                 }
-                pause_recording_url = f"{AIRCALL_API_URL}/{call_id}/recordings/pause"
+                pause_recording_url = f"{AIRCALL_API_URL}/{call_id}/pause_recording"
                 async with httpx.AsyncClient() as client:
                     try:
                         response = await client.post(pause_recording_url, headers=headers)
