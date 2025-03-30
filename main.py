@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
+
 import httpx
 import os
 import base64
@@ -9,6 +10,8 @@ from phonenumbers import geocoder
 
 # Initialize the FastAPI application
 app = FastAPI()
+
+processed_call_ids = set()
 
 # Configure basic logging to output informational messages for debugging and monitoring
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -108,6 +111,14 @@ async def handle_webhook(request: Request):
         logging.info(f"📟 Aircall number info: ID={number_id}, Name={number_name}")
 
         call_id = call_data.get("id")
+        
+        # Deduplication: skip if we've already processed this call ID
+        if call_id in processed_call_ids:
+            logging.info(f"🔁 Duplicate webhook received for call ID {call_id}. Skipping.")
+            return JSONResponse(content={"status": "duplicate_skipped"}, status_code=200)
+        # Mark this call ID as processed
+        processed_call_ids.add(call_id)
+        
         phone_number = call_data.get("raw_digits")
 
         if not phone_number:
