@@ -62,11 +62,6 @@ AIRCALL_API_ID = os.getenv("AIRCALL_API_ID")
 AIRCALL_API_TOKEN = os.getenv("AIRCALL_API_TOKEN")
 AIRCALL_API_URL = "https://api.aircall.io/v1/calls"
 
-# Retrieve the default recording behavior for calls where the state cannot be determined.
-# This allows you to configure whether to record or skip in uncertain cases.
-# The default is set to "skip" if the environment variable is not defined.
-DEFAULT_RECORDING_BEHAVIOR = os.getenv("DEFAULT_RECORDING_DEFAULT_BEHAVIOR", "skip").lower()
-
 def get_us_state_from_phone_number(phone_number: str) -> str or None:
     """
     Attempts to determine the US state from a phone number using the `phonenumbers` library.
@@ -97,155 +92,65 @@ def get_us_state_from_phone_number(phone_number: str) -> str or None:
         logging.error(f"An error occurred during phone number parsing: {e}")
         return None
 
-async def get_call_recording_status(call_id: str) -> bool or None:
-    """
-    Fetches the current recording status of a specific call from the Aircall API.
-    This is used to implement idempotency, ensuring we don't try to enable recording if it's already enabled.
-    """
-    if not AIRCALL_API_ID or not AIRCALL_API_TOKEN or not call_id:
-        return None
-    # Construct the Basic Auth credentials
-    credentials = f"{AIRCALL_API_ID}:{AIRCALL_API_TOKEN}"
-    encoded_credentials = base64.b64encode(credentials.encode()).decode()
-    headers = {
-        "Authorization": f"Basic {encoded_credentials}",
-        "Content-Type": "application/json"
-    }
-    async with httpx.AsyncClient() as client:
-        try:
-            # Make a GET request to the Aircall API to retrieve call details
-            response = await client.get(f"{AIRCALL_API_URL}/{call_id}", headers=headers)
-            response.raise_for_status()  # Raise an exception for non-2xx status codes
-            call_details = response.json()
-            # Return the value of the 'recording' field from the API response
-            return call_details.get("recording")
-        except httpx.HTTPError as e:
-            logging.error(f"Error fetching call details for ID {call_id}: {e}")
-            return None
-        except Exception as e:
-            logging.error(f"Unexpected error fetching call details for ID {call_id}: {e}")
-            return None
-
 # Define the webhook endpoint that will handle incoming POST requests from Aircall
 @app.post("/webhook")
 async def handle_webhook(request: Request):
-    # Process the incoming webhook request
-    # Read the JSON payload sent by Aircall
     payload = await request.json()
-    # Extract the 'data' part of the payload, which contains information about the call event
-    call_data = payload.get("data", {})
+    event = payload.get("event")
+    logging.info(f"Received Aircall webhook event: {event}")
 
-    # Extract information about the Aircall phone number that received the call
-    number_info = call_data.get("number", {})
-    number_id = number_info.get("id")
-    number_name = number_info.get("name")
-    logging.info(f"📟 Aircall number info: ID={number_id}, Name={number_name}")
+    if event == "call.answered":
+        call_data = payload.get("data", {})
 
-    # Extract the unique identifier of the call
-    call_id = call_data.get("id")
-    # Attempt to get the raw digits of the incoming phone number
-    phone_number = call_data.get("raw_digits")
+        number_info = call_data.get("number", {})
+        number_id = number_info.get("id")
+        number_name = number_info.get("name")
+        logging.info(f"📟 Aircall number info: ID={number_id}, Name={number_name}")
 
-    # Fallback: If 'raw_digits' is not present, try to get the phone number from the 'participants' list
-    if not phone_number:
-        for p in call_data.get("participants", []):
-            if p.get("type") == "external" and "phone_number" in p:
-                phone_number = p["phone_number"]
-                break
+        call_id = call_data.get("id")
+        phone_number = call_data.get("raw_digits")
 
-    logging.info(f"📞 Incoming call from {phone_number} with ID {call_id}")
+        if not phone_number:
+            for p in call_data.get("participants", []):
+                if p.get("type") == "external" and "phone_number" in p:
+                    phone_number = p["phone_number"]
+                    break
 
-    # Basic check for non-US phone numbers. We assume US numbers start with '+1'.
-    # More robust validation might be needed depending on your use case.
-    if not phone_number or not phone_number.startswith("+1"):
-        logging.info(f"📞 Non-US phone number detected: {phone_number}. Skipping state-based recording logic.")
-        return JSONResponse(content={"status": "non_us_number"}, status_code=200)
+        logging.info(f"📞 Incoming call from {phone_number} with ID {call_id}")
 
-    # Determine the US state of the caller based on their phone number
-    state = get_us_state_from_phone_number(phone_number)
+        if not phone_number or not phone_number.startswith("+1"):
+            logging.info(f"📞 Non-US phone number detected: {phone_number}. Skipping state-based recording logic.")
+            return JSONResponse(content={"status": "non_us_number"}, status_code=200)
 
-    # Logic to handle call recording based on the caller's state
-    # If the state is in the list of two-party consent states, do not record.
-    if state in TWO_PARTY_STATES:
-        logging.info(f"🔒 {state} is a 2-party consent state. Do NOT record call ID: {call_id}.")
-        return JSONResponse(content={"recording": False, "state": state}, status_code=200)
-    # If a US state was successfully determined and it's not a two-party consent state, attempt to enable recording.
-    elif state and state not in TWO_PARTY_STATES:
-        logging.info(f"✅ {state} is a 1-party consent state. Attempting to enable recording for call ID: {call_id}.")
-        # Check if Aircall API credentials and the call ID are available to proceed with the API call.
-        if AIRCALL_API_ID and AIRCALL_API_TOKEN and call_id:
-            # Fetch the current recording status of the call to ensure idempotency.
-            current_recording_status = await get_call_recording_status(call_id)
-            # Only attempt to enable recording if it's not already enabled.
-            if current_recording_status is not True:
-                # Construct the Basic Auth credentials for the Aircall API.
+        state = get_us_state_from_phone_number(phone_number)
+
+        if state in TWO_PARTY_STATES or state is None:
+            consent_type = "2-party" if state in TWO_PARTY_STATES else "unknown"
+            logging.info(f"🔒 {consent_type} consent state detected (or state not identified). Attempting to pause recording for call ID: {call_id}.")
+            if AIRCALL_API_ID and AIRCALL_API_TOKEN and call_id:
                 credentials = f"{AIRCALL_API_ID}:{AIRCALL_API_TOKEN}"
                 encoded_credentials = base64.b64encode(credentials.encode()).decode()
-                # Define the headers for the Aircall API request, including the Authorization header.
                 headers = {
                     "Authorization": f"Basic {encoded_credentials}",
                     "Content-Type": "application/json"
                 }
-                # Use an asynchronous HTTP client to make the API call.
+                pause_recording_url = f"{AIRCALL_API_URL}/{call_id}/recordings/pause"
                 async with httpx.AsyncClient() as client:
                     try:
-                        # Send a PATCH request to the Aircall API to set the 'recording' status to True for the specific call.
-                        response = await client.patch(
-                            f"{AIRCALL_API_URL}/{call_id}",
-                            headers=headers,
-                            json={"recording": True}
-                        )
-                        # Log the response status code and body for debugging and monitoring.
-                        logging.info(f"🔁 Aircall API response for call ID {call_id}: Status={response.status_code}, Body={response.text}")
-                        # Log an error if the Aircall API returns a status code indicating a failure.
-                        if response.status_code >= 400:
-                            logging.error(f"⚠️ Aircall API error for call ID {call_id}: Status={response.status_code}, Body={response.text}")
-                    # Handle potential HTTP errors during the API call (e.g., network issues).
+                        response = await client.post(pause_recording_url, headers=headers)
+                        logging.info(f"⏸️ Aircall API response for pausing recording on call ID {call_id}: Status={response.status_code}, Body={response.text}")
+                        return JSONResponse(content={"recording": "paused", "state": state}, status_code=response.status_code)
                     except httpx.HTTPError as e:
-                        logging.error(f"🚨 HTTP error while calling Aircall API for call ID {call_id}: {e}")
-                    # Handle any other unexpected exceptions that might occur during the API call.
+                        logging.error(f"🚨 HTTP error while calling Aircall API to pause recording on call ID {call_id}: {e}")
+                        return JSONResponse(content={"error": str(e)}, status_code=500)
                     except Exception as e:
-                        logging.error(f"🔥 An unexpected error occurred for call ID {call_id}: {e}")
+                        logging.error(f"🔥 An unexpected error occurred while pausing recording on call ID {call_id}: {e}")
+                        return JSONResponse(content={"error": str(e)}, status_code=500)
             else:
-                logging.info(f"📞 Call ID {call_id} is already being recorded. Skipping update.")
-        # Return a JSON response indicating that recording should be enabled (or was already enabled).
-        return JSONResponse(content={"recording": True, "state": state}, status_code=200)
-    # If the US state could not be determined from the phone number.
-    else:
-        logging.warning(f"❌ Could not determine US state for phone number: {phone_number} (call ID: {call_id}). Default behavior: {DEFAULT_RECORDING_BEHAVIOR}")
-        # Check the configured default recording behavior.
-        if DEFAULT_RECORDING_BEHAVIOR == "record":
-            # If the default behavior is to record even when the state is unknown.
-            if AIRCALL_API_ID and AIRCALL_API_TOKEN and call_id:
-                # Check the current recording status for idempotency.
-                current_recording_status = await get_call_recording_status(call_id)
-                if current_recording_status is not True:
-                    # Construct API credentials and headers.
-                    credentials = f"{AIRCALL_API_ID}:{AIRCALL_API_TOKEN}"
-                    encoded_credentials = base64.b64encode(credentials.encode()).decode()
-                    headers = {
-                        "Authorization": f"Basic {encoded_credentials}",
-                        "Content-Type": "application/json"
-                    }
-                    # Make the API call to enable recording.
-                    async with httpx.AsyncClient() as client:
-                        try:
-                            response = await client.patch(
-                                f"{AIRCALL_API_URL}/{call_id}",
-                                headers=headers,
-                                json={"recording": True}
-                            )
-                            logging.info(f"🔁 Aircall API response for call ID {call_id}: Status={response.status_code}, Body={response.text}")
-                            if response.status_code >= 400:
-                                logging.error(f"⚠️ Aircall API error for call ID {call_id}: Status={response.status_code}, Body={response.text}")
-                        except httpx.HTTPError as e:
-                            logging.error(f"🚨 HTTP error while calling Aircall API for call ID {call_id}: {e}")
-                        except Exception as e:
-                            logging.error(f"🔥 An unexpected error occurred for call ID {call_id}: {e}")
-                else:
-                    logging.info(f"📞 Call ID {call_id} is already being recorded (default behavior). Skipping update.")
-            # Return a JSON response indicating recording is enabled and the state is unknown.
-            return JSONResponse(content={"recording": True, "state": "unknown"}, status_code=200)
+                logging.warning("Aircall API credentials or call ID not available to pause recording.")
+                return JSONResponse(content={"status": "credentials_missing"}, status_code=500)
         else:
-            # Return a JSON response indicating that the state was unknown and recording was skipped.
-            return JSONResponse(content={"status": "unknown_state"}, status_code=200)
+            logging.info(f"✅ {state} is a 1-party consent state. Recording will continue as default for call ID: {call_id}.")
+            return JSONResponse(content={"recording": "active", "state": state}, status_code=200)
+    else:
+        return JSONResponse(content={"status": "ignored_event"}, status_code=200)
