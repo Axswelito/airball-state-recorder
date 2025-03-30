@@ -139,7 +139,16 @@ async def handle_webhook(request: Request):
                     try:
                         response = await client.post(pause_recording_url, headers=headers)
                         logging.info(f"⏸️ Aircall API response for pausing recording on call ID {call_id}: Status={response.status_code}, Body={response.text}")
-                        return JSONResponse(content={"recording": "paused", "state": state}, status_code=response.status_code)
+
+                        if response.status_code == 204:
+                            logging.info(f"✅ Successfully paused recording for call ID {call_id} (204 No Content)")
+                            return Response(status_code=204)  # Empty body
+                        else:
+                            return JSONResponse(
+                                content={"recording": "paused", "state": state},
+                                status_code=response.status_code
+                            )
+
                     except httpx.HTTPError as e:
                         logging.error(f"🚨 HTTP error while calling Aircall API to pause recording on call ID {call_id}: {e}")
                         return JSONResponse(content={"error": str(e)}, status_code=500)
