@@ -65,7 +65,7 @@ AIRCALL_API_URL = "https://api.aircall.io/v1/calls"
 # Retrieve the default recording behavior for calls where the state cannot be determined.
 # This allows you to configure whether to record or skip in uncertain cases.
 # The default is set to "skip" if the environment variable is not defined.
-DEFAULT_RECORDING_BEHAVIOR = os.getenv("DEFAULT_RECORDING_BEHAVIOR", "skip").lower()
+DEFAULT_RECORDING_BEHAVIOR = os.getenv("DEFAULT_RECORDING_DEFAULT_BEHAVIOR", "skip").lower()
 
 def get_us_state_from_phone_number(phone_number: str) -> str or None:
     """
@@ -170,7 +170,7 @@ async def handle_webhook(request: Request):
         logging.info(f"🔒 {state} is a 2-party consent state. Do NOT record call ID: {call_id}.")
         return JSONResponse(content={"recording": False, "state": state}, status_code=200)
     # If a US state was successfully determined and it's not a two-party consent state, attempt to enable recording.
-    elif state:
+    elif state and state not in TWO_PARTY_STATES:
         logging.info(f"✅ {state} is a 1-party consent state. Attempting to enable recording for call ID: {call_id}.")
         # Check if Aircall API credentials and the call ID are available to proceed with the API call.
         if AIRCALL_API_ID and AIRCALL_API_TOKEN and call_id:
