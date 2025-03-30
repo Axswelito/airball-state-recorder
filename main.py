@@ -65,42 +65,31 @@ AIRCALL_API_URL = "https://api.aircall.io/v1/calls"
 def get_us_state_from_phone_number(phone_number: str) -> str or None:
     """
     Attempts to determine the US state from a phone number using the `phonenumbers` library.
-    First tries to use geolocation data (full state name), then maps it to an abbreviation.
-    Falls back to AREA_CODE_TO_STATE mapping if geolocation fails.
+    It first tries to parse the number and get the state from the geolocation data.
+    If that fails or doesn't provide a specific state, it falls back to the `AREA_CODE_TO_STATE` mapping.
     """
     if not phone_number:
         return None
-
-    # Mapping of full state names to their abbreviations
-    STATE_NAME_TO_ABBR = {
-        "CALIFORNIA": "CA", "DELAWARE": "DE", "FLORIDA": "FL", "ILLINOIS": "IL",
-        "MARYLAND": "MD", "MASSACHUSETTS": "MA", "MICHIGAN": "MI", "MONTANA": "MT",
-        "NEW HAMPSHIRE": "NH", "OREGON": "OR", "PENNSYLVANIA": "PA", "WASHINGTON": "WA",
-        "CONNECTICUT": "CT", "NEW YORK": "NY", "TEXAS": "TX", "VIRGINIA": "VA",
-        # Add more as needed
-    }
-
     try:
+        # Parse the phone number assuming it's a US number
         parsed_number = phonenumbers.parse(phone_number, "US")
         if not phonenumbers.is_valid_number(parsed_number):
             logging.warning(f"Invalid US phone number: {phone_number}")
             return None
-
-        state_full = geocoder.description_for_number(parsed_number, "en")
-        if state_full:
-            state_abbr = STATE_NAME_TO_ABBR.get(state_full.upper())
-            if state_abbr:
-                return state_abbr
-
-        # Fallback to area code mapping
-        area_code = str(phonenumbers.national_number(parsed_number))[:3]
-        return AREA_CODE_TO_STATE.get(area_code)
-
+        # Get the geographical description for the number (this might include the state)
+        state_province = geocoder.description_for_number(parsed_number, "en")
+        if state_province:
+            # Extract the state abbreviation (assuming the last word is the state) and convert to uppercase
+            return state_province.split()[-1].upper()
+        else:
+            # Fallback: Extract the area code and look up the state in our mapping
+            area_code = str(phonenumbers.national_number(parsed_number))[:3]
+            return AREA_CODE_TO_STATE.get(area_code)
     except phonenumbers.NumberParseException:
         logging.warning(f"Could not parse phone number: {phone_number}")
         return None
     except Exception as e:
-        logging.error(f"Unexpected error while parsing phone number {phone_number}: {e}")
+        logging.error(f"An error occurred during phone number parsing: {e}")
         return None
 
 # Define the webhook endpoint that will handle incoming POST requests from Aircall
